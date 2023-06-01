@@ -52,7 +52,7 @@ def main(argv):
             logging.info("Can't define port at all. Problems in target and urlparse")
             port = None
 
-    final_results = []
+    final_results = {}
 
     # SOCKET to establish connection with the target
     try:
@@ -69,10 +69,10 @@ def main(argv):
 
                     # Test for Cross-Site Tracing
                     if "<script>alert(1);</script>" in response.text:
-                        final_results.append({"cross_site_tracing": True})
+                        final_results.update({"cross_site_tracing": True})
                         print("Site vulnerable to Cross-Site Tracing!")
                     else:
-                        final_results.append({"cross_site_tracing": False})
+                        final_results.update({"cross_site_tracing": False})
                         print("Site not vulnerable to Cross-Site Tracing!")
 
                 except requests.exceptions.RequestException as e:
@@ -90,10 +90,10 @@ def main(argv):
                     response = requests.get(url, headers={"Host": "http://crowdshield.com"}, timeout=1.0)
 
                     if frame_inject.lower() in response.text.lower():
-                        final_results.append({"host_header_injection": True})
+                        final_results.update({"host_header_injection": True})
                         print("Site vulnerable to Host Header Injection!")
                     else:
-                        final_results.append({"host_header_injection": False})
+                        final_results.update({"host_header_injection": False})
                         print("Site not vulnerable to Host Header Injection!")
 
                 except requests.exceptions.RequestException as e:
@@ -108,14 +108,14 @@ def main(argv):
                     response = requests.get(url, timeout=1.0)
 
                     if x_frame.lower() in response.headers.get("X-Frame-Options", "").lower():
-                        final_results.append({"cross_frame_click_jack": False})
-                        final_results.append({"click_jack": False})
+                        final_results.update({"cross_frame_click_jack": False})
+                        final_results.update({"click_jack": False})
 
                         print("Site not vulnerable to Cross-Frame Scripting!")
                         print("Site not vulnerable to Clickjacking!")
                     else:
-                        final_results.append({"cross_frame_click_jack": True})
-                        final_results.append({"click_jack": True})
+                        final_results.update({"cross_frame_click_jack": True})
+                        final_results.update({"click_jack": True})
 
                         print("Site vulnerable to Cross-Frame Scripting!")
                         print("Site vulnerable to Clickjacking!")
