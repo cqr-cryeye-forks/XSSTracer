@@ -1,142 +1,138 @@
 #!/usr/bin/python
 # Cross-Site Tracer v1.3 by 1N3
-# https://crowdshield.com
-#
-# ABOUT: A python script to check remote web servers for Cross-Site Tracing, Cross-Frame Scripting/Clickjacking and Host Header Injection vulnerabilities. For more robust mass scanning, you can create a list of domains or IP addresses to iterate through by doing 'for a in `cat targets.txt`; do ./xsstracer.py $a 80; done;'
-#
+
+# A python script to check remote web servers for Cross-Site Tracing, Cross-Frame Scripting/Clickjacking and Host
+# Header Injection vulnerabilities. For more robust mass scanning, you can create a list of domains or IP addresses to
+# iterate through by doing 'for a in `cat targets.txt`; do ./xsstracer.py $a 80; done;'
+
 # USAGE: xsstracer.py <IP/host> <port>
-#
 
-import socket, time, sys, getopt, httplib
+# COMMENTS: this project is 8 years old. I changed everything about it. It's pretty damn simple.
+# Forgive its functionality. Forgive me.
 
-class bcolors:
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
+from __future__ import absolute_import
+from __future__ import print_function
+
+import json
+import logging
+import pathlib
+import socket
+import sys
+from urllib.parse import urlparse
+
+import requests
+
 
 def main(argv):
-	argc = len(argv)
 
-	if argc <= 2:
-		print bcolors.OKBLUE + "	__  ______ _____ " + bcolors.ENDC
-		print bcolors.OKBLUE + "	\ \/ / ___|_   _|" + bcolors.ENDC
-		print bcolors.OKBLUE + "	 \  /\___ \ | |  " + bcolors.ENDC
-		print bcolors.OKBLUE + "	 /  \ ___) || |  " + bcolors.ENDC
-		print bcolors.OKBLUE + "	/_/\_|____/ |_|  " + bcolors.ENDC
-		print ""
-		print bcolors.OKBLUE + "+ -- --=[Cross-Site Tracer by 1N3 v1.3" + bcolors.ENDC
-		print bcolors.OKBLUE + "+ -- --=[" + bcolors.UNDERLINE + "https://crowdshield.com" + bcolors.ENDC
-        	print bcolors.OKBLUE + "+ -- --=[usage: %s <host> <port>" % (argv[0]) + bcolors.ENDC
-        	sys.exit(0)
+    target_arg = argv[1]  # SET TARGET
+    parsed_url = urlparse(target_arg)
+    target = parsed_url.netloc if parsed_url.scheme else parsed_url.path
+    scheme = parsed_url.scheme
 
-	target = argv[1] # SET TARGET
-	port = argv[2] # SET PORT
+    try:
+        port = argv[2]  # SET PORT
 
-	if port == 443:
-		print "Using HTTPS"
-		headers = {
-			'User-Agent': 'XSS Tracer v1.3 by 1N3 @ https://crowdshield.com',
-			'Content-Type': 'application/x-www-form-urlencoded',
-		}
+    except IndexError:
+        logging.info("IndexError. Port is not set in audit arguments. Attempting to set port...")
 
-		conn = httplib.HTTPSConnection(host)
-		conn.request("GET", "/", "", headers)
-		response = conn.getresponse()
-		data = response.read()
+        if scheme == 'http':
+            port = '80'
+            logging.info("Port was set to: 80")
 
-		print 'Response: ', response.status, response.reason
-		print 'Data:'
-		print data
+        elif scheme == 'https':
+            port = '443'
+            logging.info("Port was set to: 443")
 
-	else:
-		buffer1 = "TRACE / HTTP/1.1"
-		buffer2 = "Test: <script>alert(1);</script>"
-		buffer3 = "Host: " + target
+        elif scheme == '':
+            port = '80'
+            logging.info("Schema not specified. Target is domain or IPv4. Moving to http schema : 80")
 
-		buffer4 = "GET / HTTP/1.1"
+        else:
+            logging.info("Can't define port at all. Problems in target and urlparse")
+            port = None
 
-		print ""
-		print bcolors.OKBLUE + "	__  ______ _____ " + bcolors.ENDC
-		print bcolors.OKBLUE + "	\ \/ / ___|_   _|" + bcolors.ENDC
-		print bcolors.OKBLUE + "	 \  /\___ \ | |  " + bcolors.ENDC
-		print bcolors.OKBLUE + "	 /  \ ___) || |  " + bcolors.ENDC
-		print bcolors.OKBLUE + "	/_/\_|____/ |_|  " + bcolors.ENDC
-		print ""
-		print bcolors.OKBLUE + "+ -- --=[Cross-Site Tracer v1.3 by 1N3 @ CrowdShield" + bcolors.ENDC
-		print bcolors.OKBLUE + "+ -- --=[Target: " + target + ":" + port + bcolors.ENDC
+    final_results = []
 
-		s=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		result=s.connect_ex((target,int(port)))
-		s.settimeout(1.0)
+    # SOCKET to establish connection with the target
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(1.0)
+            result = s.connect_ex((target, int(port)))
 
-		if result == 0:
-			s.send(buffer1 + "\n")
-			s.send(buffer2 + "\n")
-			s.send(buffer3 + "\n\n")
-			data1 = s.recv(1024)
-			s.close()
+            if result == 0:  # CONNECTION OK
+                url = f"http://{target}:{port}/"
 
-			script = "alert"
-			xframe = "X-Frame-Options"
-			#hsts = "Strict-Transport-Security"
+                try:
+                    response = requests.request("TRACE", url, headers={"Test": "<script>alert(1);</script>"},
+                                                timeout=1.0)
 
-			# TEST FOR XST
-			if script.lower() in data1.lower():
-				print bcolors.FAIL + "+ -- --=[Site vulnerable to Cross-Site Tracing!" + bcolors.ENDC
+                    # Test for Cross-Site Tracing
+                    if "<script>alert(1);</script>" in response.text:
+                        final_results.append({"cross_site_tracing": True})
+                        print("Site vulnerable to Cross-Site Tracing!")
+                    else:
+                        final_results.append({"cross_site_tracing": False})
+                        print("Site not vulnerable to Cross-Site Tracing!")
 
-			else:
-				print bcolors.OKGREEN + "+ -- --=[Site not vulnerable to Cross-Site Tracing!" + bcolors.ENDC
+                except requests.exceptions.RequestException as e:
+                    if isinstance(e, requests.exceptions.ConnectionError):
+                        print("An error occurred during the request: Connection error")
+                    else:
+                        print(f"An error occurred during the request: {e}")
 
-			# TEST FOR HOST HEADER INJECTION
-			frame_inject = "crowdshield"
-			buffer1 = "GET / HTTP/1.1"
-			buffer2 = "Host: http://crowdshield.com"
+                # Test for Host Header Injection
+                frame_inject = "crowdshield"
 
-			s3=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-			result=s3.connect_ex((target,int(port)))
-			s3.settimeout(1.0)
-			s3.send(buffer1 + "\n")
-			s3.send(buffer2 + "\n\n")
-			data3 = s3.recv(1024)
-			s3.close()
+                url = f"http://{target}:{port}/"
 
-			if frame_inject.lower() in data3.lower():
-				print bcolors.FAIL + "+ -- --=[Site vulnerable to Host Header Injection!" + bcolors.ENDC
+                try:
+                    response = requests.get(url, headers={"Host": "http://crowdshield.com"}, timeout=1.0)
 
-			else:
-				print bcolors.OKGREEN + "+ -- --=[Site not vulnerable to Host Header Injection!" + bcolors.ENDC
+                    if frame_inject.lower() in response.text.lower():
+                        final_results.append({"host_header_injection": True})
+                        print("Site vulnerable to Host Header Injection!")
+                    else:
+                        final_results.append({"host_header_injection": False})
+                        print("Site not vulnerable to Host Header Injection!")
 
-			# TEST FOR CLICKJACKING AND CFS
-			s2=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-			result=s2.connect_ex((target,int(port)))
-			s2.settimeout(1.0)
-			s2.send(buffer4 + "\n")
-			s2.send(buffer3 + "\n\n")
-			data2 = s2.recv(1024)
-			s2.close()
+                except requests.exceptions.RequestException as e:
+                    print(f"An error occurred during the request: {e}")
 
-			if xframe.lower() in data2.lower():
-				print bcolors.OKGREEN + "+ -- --=[Site not vulnerable to Cross-Frame Scripting!" + bcolors.ENDC
-				print bcolors.OKGREEN + "+ -- --=[Site not vulnerable to Clickjacking!" + bcolors.ENDC
+                # Test for Clickjacking and CFS
+                x_frame = "X-Frame-Options"
 
-			else:
-				print bcolors.FAIL + "+ -- --=[Site vulnerable to Cross-Frame Scripting!" + bcolors.ENDC
-				print bcolors.FAIL + "+ -- --=[Site vulnerable to Clickjacking!" + bcolors.ENDC
-		
-			# DISPLAY HEADERS
-			print ""
-			print bcolors.WARNING + data1 + bcolors.ENDC
-			print bcolors.WARNING + data2 + bcolors.ENDC
-			print ""
-			print ""
+                url = f"http://{target}:{port}/"
 
-		else:
-			print bcolors.WARNING + "+ -- --=[Port is closed!" + bcolors.ENDC
+                try:
+                    response = requests.get(url, timeout=1.0)
+
+                    if x_frame.lower() in response.headers.get("X-Frame-Options", "").lower():
+                        final_results.append({"cross_frame_click_jack": False})
+                        final_results.append({"click_jack": False})
+
+                        print("Site not vulnerable to Cross-Frame Scripting!")
+                        print("Site not vulnerable to Clickjacking!")
+                    else:
+                        final_results.append({"cross_frame_click_jack": True})
+                        final_results.append({"click_jack": True})
+
+                        print("Site vulnerable to Cross-Frame Scripting!")
+                        print("Site vulnerable to Clickjacking!")
+
+                except requests.exceptions.RequestException as e:
+                    print(f"An error occurred during the request: {e}")
+
+            else:
+                print("Unable to establish a connection to the target.")
+
+    except socket.error as e:
+        print(f"An error occurred during the connection: {e}")
+
+
+    root_path = pathlib.Path(__file__).parent
+    file_path = root_path.joinpath('result.json')
+    file_path.write_text(json.dumps(final_results))
+
 
 main(sys.argv)
-
